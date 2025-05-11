@@ -126,6 +126,20 @@ class DataArguments:
         },
     )
 
+    ignore_chunk_pairs: list[list[str]] = field(
+        default_factory=list,
+        metadata={
+            "help": "List of [start_tag, end_tag] pairs."
+            "Tokens in assistant responses that fall between any pair "
+            "will get label = IGNORE_INDEX, i.e. they are excluded from the loss. "
+            "Example (YAML):\n"
+            "  ignore_chunk_pairs:\n"
+            "    - ['<execution_results>', '</execution_results>']\n"
+            "CLI:\n"
+            "  --ignore_chunk_pairs \"[['<exec>', '</exec>']]\""
+        }
+    )
+
     def __post_init__(self):
         def split_arg(arg):
             if isinstance(arg, str):

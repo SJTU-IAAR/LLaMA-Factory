@@ -704,5 +704,23 @@
       "prompt": "content"
     },
     "folder": "python"
+  },
+  "hot_retool_7709": {
+    "file_name": "hot_retool_7709.json",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "instruction",
+      "response": "response",
+      "system": "system"
+    }
+  },
+  "hot_retool_0502": {
+    "file_name": "hot_retool_0502.json",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "instruction",
+      "response": "response",
+      "system": "system"
+    }
   }
 }

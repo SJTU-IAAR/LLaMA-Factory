@@ -30,6 +30,42 @@ logger = logging.get_logger(__name__)
 
 @dataclass
 class SupervisedDatasetProcessor(DatasetProcessor):
+
+    @property
+    # @lru_cache()
+    def _ignore_token_pairs(self) -> list[tuple[list[int], list[int]]]:
+        pairs = []
+        for start, end in getattr(self.data_args, "ignore_chunk_pairs", []):
+            start_ids = self.tokenizer(start, add_special_tokens=False)["input_ids"]
+            end_ids   = self.tokenizer(end,   add_special_tokens=False)["input_ids"]
+            if start_ids and end_ids:
+                pairs.append((start_ids, end_ids))
+        return pairs
+
+    def _mask_target(self, target_ids: list[int]) -> list[int]:
+        if not self._ignore_token_pairs:
+            return target_ids
+        labels = target_ids.copy()
+        n = len(labels)
+        for s_ids, e_ids in self._ignore_token_pairs:
+            i = 0
+            s_len, e_len = len(s_ids), len(e_ids)
+            while i < n:
+                if labels[i : i + s_len] == s_ids:     # start
+                    j = i + s_len
+                    while j < n and labels[j : j + e_len] != e_ids:
+                        j += 1
+                    if j < n:                          # end
+                        j += e_len
+                    else:                              # if the end tokens are missing, mask till the end
+                        j = n
+                    for k in range(i, j):
+                        labels[k] = IGNORE_INDEX
+                    i = j                               # continue searching
+                else:
+                    i += 1
+        return labels
+    
     def _encode_data_example(
         self,
         prompt: list[dict[str, str]],
@@ -70,7 +106,7 @@ class SupervisedDatasetProcessor(DatasetProcessor):
             if self.data_args.mask_history and turn_idx != 0:  # train on the last turn only
                 target_label = [IGNORE_INDEX] * target_len
             else:
-                target_label = target_ids
+                target_label = self._mask_target(target_ids)
 
             if self.data_args.mask_history:  # reversed sequences
                 input_ids = source_ids + target_ids + input_ids
