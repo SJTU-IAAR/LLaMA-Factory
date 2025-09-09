@@ -31,6 +31,7 @@ from .processor import (
     PretrainDatasetProcessor,
     SupervisedDatasetProcessor,
     UnsupervisedDatasetProcessor,
+    AgenticSupervisedDatasetProcessor
 )
 
 
@@ -215,7 +216,10 @@ def _get_dataset_processor(
                 OptimizedTypedSequence.__init__ = __init__
             dataset_processor_class = PackedSupervisedDatasetProcessor
         else:
-            dataset_processor_class = SupervisedDatasetProcessor
+            if data_args.ignore_chunk_pairs:
+                dataset_processor_class = AgenticSupervisedDatasetProcessor
+            else:
+                dataset_processor_class = SupervisedDatasetProcessor
 
     elif stage == "rm":
         dataset_processor_class = PairwiseDatasetProcessor

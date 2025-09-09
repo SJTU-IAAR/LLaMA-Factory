@@ -157,6 +157,165 @@ class SupervisedDatasetProcessor(DatasetProcessor):
         print("label_ids:\n{}".format(example["labels"]))
         print(f"labels:\n{self.tokenizer.decode(valid_labels, skip_special_tokens=False)}")
 
+@dataclass
+class AgenticSupervisedDatasetProcessor(DatasetProcessor):
+
+
+    def split_by_execution_results(self, input_string:str):
+        import re
+        # 定位所有 <execution_results> 和 </execution_results> 标签的索引
+        pattern = r'(<execution_results>\n.*?</execution_results>\n)'
+        matches = re.findall(pattern, input_string, re.DOTALL)
+
+        # 处理字符串，拆分在 <execution_results> 和 </execution_results> 标签之间的内容
+        parts = []
+        flags = []
+        last_pos = 0
+        for match in matches:
+            # 找到 <execution_results> 出现的地方
+            start_index = input_string.find(match, last_pos)
+            
+            # 记录 <execution_results> 前的部分
+            if start_index > last_pos:
+                parts.append(input_string[last_pos:start_index].strip())
+                flags.append(False)
+            
+            # 记录整个 <execution_results> 块
+            parts.append(match.strip())
+            flags.append(True)
+            
+            # 更新 last_pos 到当前位置
+            last_pos = start_index + len(match)
+        
+        # 记录剩余部分（<execution_results> 后的部分）
+        if last_pos < len(input_string):
+            parts.append(input_string[last_pos:].strip()+'\n')
+            flags.append(False)
+        
+        return parts, flags
+
+
+
+
+    def _encode_data_example(
+        self,
+        prompt: list[dict[str, str]],
+        response: list[dict[str, str]],
+        system: Optional[str],
+        tools: Optional[str],
+        images: list["ImageInput"],
+        videos: list["VideoInput"],
+        audios: list["AudioInput"],
+    ) -> tuple[list[int], list[int]]:
+        messages = self.template.mm_plugin.process_messages(prompt + response, images, videos, audios, self.processor)
+        input_ids, labels = self.template.mm_plugin.process_token_ids(
+            [], [], images, videos, audios, self.tokenizer, self.processor
+        )
+        # import pdb
+        # pdb.set_trace()
+        encoded_pairs = self.template.encode_multiturn(self.tokenizer, messages, system, tools)
+        try:
+            assert len(encoded_pairs) == 1
+            assert len(encoded_pairs[0]) == 2
+        except:
+            raise RuntimeError(f"Agentic processor only process one turn, but here are {len(encoded_pairs)} qa.")
+        
+        
+        # pdb.set_trace()
+
+        tgt_id = encoded_pairs[0][1]
+        source_ids = encoded_pairs[0][0]
+
+        agent_response = self.tokenizer.decode(tgt_id)
+
+        parts, flags = self.split_by_execution_results(agent_response)
+
+        assert len(parts) == len(flags)
+
+        # pdb.set_trace()
+
+        target_ids, target_label = [], []
+        for i, part in enumerate(parts):
+
+            encode_ids = self.tokenizer.encode(part)
+
+            target_ids += encode_ids
+            target_label += encode_ids if not flags[i] else [IGNORE_INDEX for j in range(len(encode_ids))]
+
+        # pdb.set_trace()
+
+        total_length = len(input_ids) + (1 if self.template.efficient_eos else 0)
+        
+
+        
+        if total_length >= self.data_args.cutoff_len:
+            return input_ids, labels
+
+        source_len, target_len = infer_seqlen(
+            len(source_ids), len(target_ids), self.data_args.cutoff_len - total_length
+        )
+        source_ids = source_ids[:source_len]
+        target_ids = target_ids[:target_len]
+        target_label = target_label[:target_len]
+        total_length += source_len + target_len
+
+        
+        source_label = [IGNORE_INDEX] * source_len
+        
+        input_ids += source_ids + target_ids
+        labels += source_label + target_label
+
+        # pdb.set_trace()
+
+        return input_ids, labels
+
+
+
+    def preprocess_dataset(self, examples):
+        # build inputs with format `<bos> X Y <eos>` and labels with format `<ignore> ... <ignore> Y <eos>`
+        # for multiturn examples, we only mask the prompt part in each prompt-response pair.
+        model_inputs = defaultdict(list)
+        for i in range(len(examples["_prompt"])):
+            if len(examples["_prompt"][i]) % 2 != 1 or len(examples["_response"][i]) != 1:
+                logger.warning_rank0(
+                    "Dropped invalid example: {}".format(examples["_prompt"][i] + examples["_response"][i])
+                )
+                continue
+            # import pdb
+            # pdb.set_trace()
+            input_ids, labels = self._encode_data_example(
+                prompt=examples["_prompt"][i],
+                response=examples["_response"][i],
+                system=examples["_system"][i],
+                tools=examples["_tools"][i],
+                images=examples["_images"][i] or [],
+                videos=examples["_videos"][i] or [],
+                audios=examples["_audios"][i] or [],
+            )
+            model_inputs["input_ids"].append(input_ids)
+            model_inputs["attention_mask"].append([1] * len(input_ids))
+            model_inputs["labels"].append(labels)
+            model_inputs["images"].append(examples["_images"][i])
+            model_inputs["videos"].append(examples["_videos"][i])
+            model_inputs["audios"].append(examples["_audios"][i])
+
+        return model_inputs
+    
+
+    def print_data_example(self, example):
+        valid_labels = list(filter(lambda x: x != IGNORE_INDEX, example["labels"]))
+        print("input_ids:\n{}".format(example["input_ids"]))
+        print("inputs:\n{}".format(self.tokenizer.decode(example["input_ids"], skip_special_tokens=False)))
+        print("label_ids:\n{}".format(example["labels"]))
+        print(f"labels:\n{self.tokenizer.decode(valid_labels, skip_special_tokens=False)}")
+
+
+
+
+
+
+
+
 
 @dataclass
 class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):

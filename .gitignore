@@ -178,5 +178,5 @@ swanlog/
 generated_predictions.jsonl
 predictions_score.json
 examples/
-data/
 data/dataset_info.json
+data/*
